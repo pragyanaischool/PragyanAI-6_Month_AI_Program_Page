@@ -10,4 +10,5 @@ langchain-huggingface
 langchain-text-splitters
 pypdf
 faiss-cpu
+transformers
 sentence-transformers
