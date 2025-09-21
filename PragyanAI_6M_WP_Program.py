@@ -304,7 +304,7 @@ except (KeyError, FileNotFoundError):
     api_key_present = False
 
 if not api_key_present:
-    st.warning("`GROQ_API_KEY` not found in Streamlit secrets. The Q&A bot is disabled.", icon="⚠️")
+    st.warning("LLM API KEY not found in Streamlit secrets. The Q&A bot is disabled.", icon="⚠️")
 elif st.session_state.vector_store is None:
     st.warning("The knowledge base for the AI Advisor could not be loaded. Please check data sources.", icon="🧠")
 else:
