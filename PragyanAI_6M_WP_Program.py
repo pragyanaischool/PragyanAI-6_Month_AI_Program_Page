@@ -6,7 +6,7 @@ from langchain_core.output_parsers import StrOutputParser
 
 # --- Page Configuration ---
 st.set_page_config(
-    page_title="PragyanAI - Executive Program in Generative & Agentic AI",
+    page_title="PragyanAI - 6 Month Executive Program in Generative & Agentic AI",
     page_icon="🚀",
     layout="wide",
     initial_sidebar_state="collapsed"
@@ -51,6 +51,11 @@ st.markdown("""
         background-color: #f1f5f9;
         color: #ea580c !important;
     }
+    
+    /* Expander Styles */
+    .st-emotion-cache-1h9usn1 p {
+        font-size: 1.1rem;
+    }
 
     /* Custom Classes */
     .gradient-text {
@@ -88,7 +93,6 @@ def load_data(sheet_url):
     try:
         csv_url = sheet_url.replace("/edit#gid=", "/export?format=csv&gid=")
         df = pd.read_csv(csv_url)
-        # Ensure the columns are named correctly, even if they are not in the sheet
         if 'Question' not in df.columns or 'Answer' not in df.columns:
             st.error("Google Sheet must contain 'Question' and 'Answer' columns.")
             return None
@@ -131,18 +135,20 @@ st.markdown("<br><br>", unsafe_allow_html=True)
 
 # --- Curriculum Section ---
 st.markdown('<h2 class="section-header">Mastery Across 8 Core AI Domains</h2>', unsafe_allow_html=True)
-domains = [
-    "1. Advanced Python & Data Engineering", "2. Applied Data Science & Analytics",
-    "3. BI & Big Data Architecture", "4. Practical Machine Learning & MLOps",
-    "5. Applied Deep Learning & Computer Vision", "6. NLP & Conversational AI",
-    "7. Generative AI & Large Language Models", "8. Agentic AI & MVP Development"
-]
-rows = [st.columns(4) for _ in range(2)]
-flat_list = [item for sublist in rows for item in sublist]
-for i, domain in enumerate(domains):
-    with flat_list[i]:
-        st.info(domain)
-
+curriculum_details = {
+    "1. Advanced Python & Data Engineering": ["Advanced Data Wrangling (Pandas, Polars, Dask)", "Multi-Modal Data Processing (Images, Audio, Video)", "Web Automation & Data Extraction (Selenium, BeautifulSoup)"],
+    "2. Applied Data Science & Analytics": ["Practical Statistics for ML (Hypothesis Testing, ANOVA)", "Advanced Interactive Data Visualization (Plotly, Seaborn)", "Automated EDA & Feature Engineering"],
+    "3. BI & Big Data Architecture": ["Business Intelligence (BI) Fundamentals", "Modern Data Architectures (Data Lakes, Warehouses)", "Hands-on with Open-Source BI Platforms (Metabase, Superset)"],
+    "4. Practical Machine Learning & MLOps": ["Advanced Algorithms (XGBoost, LightGBM, CatBoost)", "Model Optimization & Hyperparameter Tuning (Optuna)", "MLOps & Deployment (Streamlit, Gradio, FastAPI)", "Explainable AI (XAI) with SHAP & LIME"],
+    "5. Applied Deep Learning & Computer Vision": ["Core Architectures: CNNs, RNNs, Transformers", "Advanced CV Tasks: Object Detection, Segmentation, OCR", "Working with SOTA Models (YOLO, SAM, ViT)", "Edge AI & Model Optimization (TensorFlow Lite)"],
+    "6. NLP & Conversational AI": ["Modern Text Representation (BERT & Embeddings)", "Core NLP Applications (NER, Sentiment Analysis)", "Building Conversational AI & Chatbots"],
+    "7. Generative AI & Large Language Models": ["Deep Dive into the Transformer Architecture", "Retrieval Augmented Generation (RAG)", "LLM Fine-Tuning with PEFT & LoRA", "Advanced Prompt Engineering (Chain-of-Thought, ReAct)"],
+    "8. Agentic AI & MVP Development": ["AI Agent Architecture & Frameworks (CrewAI, AutoGen)", "Multi-Agent Collaborative Systems", "Rapid AI-Powered MVP Prototyping", "From Developer to AI Solution Designer"]
+}
+for domain, sub_topics in curriculum_details.items():
+    with st.expander(f"**{domain}**"):
+        for topic in sub_topics:
+            st.markdown(f"- {topic}")
 st.markdown("<br><br>", unsafe_allow_html=True)
 
 # --- Q&A Section ---
@@ -153,103 +159,59 @@ try:
     groq_api_key = st.secrets["GROQ_API_KEY"]
     api_key_present = True
 except (KeyError, FileNotFoundError):
-    st.warning("`GROQ_API_KEY` not found in Streamlit secrets. The Q&A bot is disabled. Please add it to your secrets file.", icon="⚠️")
     api_key_present = False
 
-# Placeholder for your public Google Sheet URL
-# IMPORTANT: Make sure your sheet is public ("Anyone with the link can view")
 google_sheet_url = "https://docs.google.com/spreadsheets/d/1Qsyn7n39z_tDoCUyF3C3a-k2jTym-2a--g6_7V2-S9U/edit#gid=0"
 
+# Initialize chat history
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+# Display prior chat messages
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
 
 if api_key_present:
-    # Load data and prepare context
     qa_data = load_data(google_sheet_url)
     if qa_data is not None:
         context = "\n".join([f"Q: {row['Question']}\nA: {row['Answer']}" for index, row in qa_data.iterrows()])
         
-        # Initialize chat history
-        if "messages" not in st.session_state:
-            st.session_state.messages = []
-
-        # Display chat messages from history
-        for message in st.session_state.messages:
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"])
-
-        # React to user input
         if prompt := st.chat_input("Ask about the program, fees, schedule..."):
-            # Add user message to chat history
             st.session_state.messages.append({"role": "user", "content": prompt})
-            # Display user message in chat message container
             with st.chat_message("user"):
                 st.markdown(prompt)
 
-            # Display assistant response in chat message container
             with st.chat_message("assistant"):
                 try:
-                    # Initialize LangChain components
-                    llm = ChatGroq(
-                        model_name="llama-3.3-70b-versatile",
-                        groq_api_key=groq_api_key
-                    )
-                    
-                    system_prompt = """You are a helpful assistant for the Pragyan AI Executive Program. Answer the user's question based ONLY on the following information. If the answer is not in the information, say 'I do not have that information, please contact us for more details.'
-
-                    <CONTEXT>
-                    {context}
-                    </CONTEXT>
-                    """
-                    
-                    prompt_template = ChatPromptTemplate.from_messages([
-                        ("system", system_prompt),
-                        ("human", "{user_question}")
-                    ])
-
+                    llm = ChatGroq(model_name="llama-3.3-70b-versatile", groq_api_key=groq_api_key)
+                    system_prompt = "You are a helpful assistant for the Pragyan AI Executive Program. Answer the user's question based ONLY on the following information. If the answer is not in the information, say 'I do not have that information, please contact us for more details.'\n\n<CONTEXT>\n{context}\n</CONTEXT>"
+                    prompt_template = ChatPromptTemplate.from_messages([("system", system_prompt), ("human", "{user_question}")])
                     output_parser = StrOutputParser()
-                    
                     chain = prompt_template | llm | output_parser
-                    
-                    response = chain.invoke({
-                        "context": context,
-                        "user_question": prompt
-                    })
-                    
+                    response = chain.invoke({"context": context, "user_question": prompt})
                     st.markdown(response)
-                    # Add assistant response to chat history
                     st.session_state.messages.append({"role": "assistant", "content": response})
                 except Exception as e:
                     st.error(f"An error occurred with the AI assistant: {e}")
     else:
         st.info("Q&A data could not be loaded. Please check the Google Sheet URL and permissions.")
-
+else:
+    st.warning("`GROQ_API_KEY` not found in Streamlit secrets. The Q&A bot is disabled. Please add it to your secrets file.", icon="⚠️")
+    st.chat_input("Q&A Bot is disabled. API key is missing.", disabled=True)
 
 st.markdown("<br><br>", unsafe_allow_html=True)
-
 
 # --- Call to Action Section ---
 st.markdown('<div class="highlight-card" style="background-color: #334155;">', unsafe_allow_html=True)
 st.markdown('<h2 class="section-header">Secure Your Future in the Age of AI</h2>', unsafe_allow_html=True)
 st.markdown('<p style="text-align: center;">Enrollment is now open. Take the next step in your career.</p>', unsafe_allow_html=True)
-
 cta_cols = st.columns([1, 1])
-
 with cta_cols[0]:
-    # Link button to a Google Drive document
-    st.link_button(
-        "📄 View Program Brochure",
-        "https://drive.google.com/file/d/1JXtgnsfceX7doT8-mECEGjE_MXQgp9lK/view?usp=sharing",
-        use_container_width=True,
-    )
-    
+    st.link_button("📄 View Program Brochure", "https://drive.google.com/file/d/1JXtgnsfceX7doT8-mECEGjE_MXQgp9lK/view?usp=sharing", use_container_width=True)
 with cta_cols[1]:
-    # Link button to redirect to Google Form
-    st.link_button(
-        "📝 Express Interest (Google Form)", 
-        "https://forms.gle/YLKzVeEPsy685KvJA",
-        use_container_width=True
-    )
+    st.link_button("📝 Express Interest (Google Form)", "https://forms.gle/YLKzVeEPsy685KvJA", use_container_width=True)
 st.markdown('</div>', unsafe_allow_html=True)
-
 
 # --- Footer ---
 st.markdown(
