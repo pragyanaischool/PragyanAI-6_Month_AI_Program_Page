@@ -200,7 +200,7 @@ def initialize_knowledge_base():
 initialize_knowledge_base()
 
 # --- CHAT DIALOG FUNCTION ---
-@st.dialog("AI Marketing Advisor")
+@st.dialog("PragyanAI - AI Marketing Advisor")
 def run_chat_dialog():
     """Contains the entire chat UI and logic within a Streamlit Dialog."""
     for message in st.session_state.messages:
@@ -300,7 +300,7 @@ for domain, sub_topics in curriculum_details.items():
 st.markdown("<br><br>", unsafe_allow_html=True)
 
 # --- Q&A Section ---
-st.markdown('<h2 class="section-header">Have Questions? Ask our AI Marketing Advisor</h2>', unsafe_allow_html=True)
+st.markdown('<h2 class="section-header">Have Questions? Ask PragyanAI AI Marketing Advisor</h2>', unsafe_allow_html=True)
 
 # Check for Groq API Key in secrets
 try:
@@ -310,13 +310,13 @@ except (KeyError, FileNotFoundError):
     api_key_present = False
 
 if not api_key_present:
-    st.warning("`GROQ_API_KEY` not found in Streamlit secrets. The Q&A bot is disabled.", icon="⚠️")
+    st.warning(" LLM API KEY not found in Streamlit secrets. The Q&A bot is disabled.", icon="⚠️")
 elif st.session_state.vector_store is None:
     st.warning("The knowledge base for the AI Advisor could not be loaded. Please check data sources.", icon="🧠")
 else:
     st.session_state.user_name = st.text_input("Please enter your name to start the chat:", st.session_state.user_name)
     if st.session_state.user_name:
-        if st.button("🚀 Launch AI Advisor"):
+        if st.button("🚀 Launch PRAGYANAI -  Program Advisor"):
             st.session_state.chat_dialog_open = True
     
     if st.session_state.chat_dialog_open:
