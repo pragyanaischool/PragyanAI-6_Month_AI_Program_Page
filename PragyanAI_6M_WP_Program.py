@@ -1,8 +1,16 @@
 import streamlit as st
 import pandas as pd
+import requests
+import io
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
+from langchain_community.vectorstores import FAISS
+from langchain_community.docstore.document import Document
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_core.runnables import RunnableParallel, RunnablePassthrough, RunnableLambda
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from pypdf import PdfReader
 
 # --- Page Configuration ---
 st.set_page_config(
@@ -86,20 +94,76 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# --- Data Loading Function ---
-@st.cache_data(ttl=600) # Cache data for 10 minutes
-def load_data(sheet_url):
+# --- Data Loading and Caching Functions ---
+@st.cache_data(ttl=600)
+def load_faq_data(sheet_url):
     """Loads Q&A data from a public Google Sheet."""
     try:
         csv_url = sheet_url.replace("/edit?usp=sharing", "/export?format=csv")
         df = pd.read_csv(csv_url)
-        if 'Question' not in df.columns or 'Answer' not in df.columns:
-            st.error("Google Sheet must contain 'Question' and 'Answer' columns.")
+        if 'FAQs' not in df.columns or 'Answere' not in df.columns:
+            st.error("Google Sheet must contain 'FAQs' and 'Answere' columns.")
             return None
         return df
     except Exception as e:
         st.error(f"Failed to load data from Google Sheet: {e}")
         return None
+
+@st.cache_data(ttl=600)
+def load_pdf_from_gdrive(drive_url):
+    """Downloads and extracts text from a PDF in Google Drive."""
+    try:
+        file_id = drive_url.split('/d/')[1].split('/')[0]
+        download_url = f'https://drive.google.com/uc?export=download&id={file_id}'
+        response = requests.get(download_url)
+        response.raise_for_status()
+        
+        pdf_file = io.BytesIO(response.content)
+        reader = PdfReader(pdf_file)
+        text = ""
+        for page in reader.pages:
+            text += page.extract_text()
+        
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+        splits = text_splitter.split_text(text)
+        
+        # Create Document objects for easier processing
+        documents = [Document(page_content=split, metadata={"source": "program_brochure"}) for split in splits]
+        return documents
+
+    except Exception as e:
+        st.error(f"Failed to load or process PDF from Google Drive: {e}")
+        return None
+
+
+@st.cache_resource
+def get_embeddings():
+    """Initializes and returns the sentence transformer embeddings model."""
+    return HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+
+@st.cache_resource
+def create_vector_store(_faq_df, _pdf_docs, embeddings):
+    """Creates a FAISS vector store from the FAQ DataFrame and PDF documents."""
+    documents = []
+    # Process FAQ data
+    if _faq_df is not None:
+        faq_docs = [
+            Document(
+                page_content=f"Question: {row['FAQs']}\nAnswer: {row['Answere']}",
+                metadata={"source": "faq_sheet"}
+            ) for index, row in _faq_df.iterrows()
+        ]
+        documents.extend(faq_docs)
+    
+    # Process PDF data
+    if _pdf_docs is not None:
+        documents.extend(_pdf_docs)
+
+    if not documents:
+        return None
+        
+    vector_store = FAISS.from_documents(documents, embeddings)
+    return vector_store
 
 # --- Header ---
 col1, col2, col3 = st.columns([2, 5, 2])
@@ -152,7 +216,7 @@ for domain, sub_topics in curriculum_details.items():
 st.markdown("<br><br>", unsafe_allow_html=True)
 
 # --- Q&A Section ---
-st.markdown('<h2 class="section-header">Have Questions? Ask our AI Assistant</h2>', unsafe_allow_html=True)
+st.markdown('<h2 class="section-header">Have Questions? Ask our AI Marketing Advisor</h2>', unsafe_allow_html=True)
 
 # Check for Groq API Key in secrets
 try:
@@ -161,7 +225,8 @@ try:
 except (KeyError, FileNotFoundError):
     api_key_present = False
 
-google_sheet_url = "https://docs.google.com/spreadsheets/d/14NTraereEwWwLyhycjCP0TKJ2-a6eY38xjy5EbAN-jM/edit?usp=sharing"
+faq_sheet_url = "https://docs.google.com/spreadsheets/d/14NTraereEwWwLyhycjCP0TKJ2-a6eY38xjy5EbAN-jM/edit?usp=sharing"
+brochure_drive_url = "https://drive.google.com/file/d/1JXtgnsfceX7doT8-mECEGjE_MXQgp9lK/view?usp=sharing"
 
 # Initialize session state variables
 if "messages" not in st.session_state:
@@ -178,66 +243,84 @@ for message in st.session_state.messages:
         st.markdown(message["content"])
 
 if api_key_present and st.session_state.user_name:
-    qa_data = load_data(google_sheet_url)
-    if qa_data is not None:
-        context = "\n".join([f"Q: {row['Question']}\nA: {row['Answer']}" for index, row in qa_data.iterrows()])
-        
-        if prompt := st.chat_input("Ask about the program, fees, schedule..."):
-            st.session_state.messages.append({"role": "user", "content": prompt})
-            with st.chat_message("user"):
-                st.markdown(prompt)
+    faq_data = load_faq_data(faq_sheet_url)
+    pdf_docs = load_pdf_from_gdrive(brochure_drive_url)
 
-            with st.chat_message("assistant"):
-                try:
-                    chat_history_str = "\n".join([f"{msg['role']}: {msg['content']}" for msg in st.session_state.messages])
+    if faq_data is not None or pdf_docs is not None:
+        embeddings = get_embeddings()
+        vector_store = create_vector_store(faq_data, pdf_docs, embeddings)
 
-                    llm = ChatGroq(model_name="llama-3.3-70b-versatile", groq_api_key=groq_api_key)
-                    
-                    system_prompt = """You are a friendly and helpful assistant for the Pragyan AI Executive Program. Your name is PragyanAI Bot. Your goal is to answer questions for a user named {user_name}.
+        if vector_store is not None:
+            retriever = vector_store.as_retriever(search_kwargs={'k': 5})
+            
+            if prompt := st.chat_input("Ask about career impact, curriculum, fees..."):
+                st.session_state.messages.append({"role": "user", "content": prompt})
+                with st.chat_message("user"):
+                    st.markdown(prompt)
 
-                    Follow these rules strictly:
-                    1. Be conversational and encouraging. Address the user by their name, {user_name}, when appropriate.
-                    2. Base your answers ONLY on the provided context from the FAQ sheet.
-                    3. Consider the ongoing conversation history to maintain context and avoid repetition.
-                    4. If the answer is not in the provided context, you MUST say: "That's a great question, {user_name}! I don't have that specific information right now, but please reach out to our team at pragyan.ai.school@gmail.com for more details." Do not make up answers.
+                with st.chat_message("assistant"):
+                    try:
+                        llm = ChatGroq(model_name="llama-3.3-70b-versatile", groq_api_key=groq_api_key)
+                        
+                        system_prompt_template = """You are an expert marketing advisor and enthusiastic career coach for the Pragyan AI Executive Program. Your name is PragyanAI Bot. Your goal is to advise a user named {user_name} on why this program is a critical step for their career.
 
-                    <CONVERSATION_HISTORY>
-                    {chat_history}
-                    </CONVERSATION_HISTORY>
+                        Follow these rules strictly:
+                        1.  **Persona**: Be persuasive, encouraging, and an expert on AI career paths. Frame every answer to highlight the *value and benefits* for a working professional. Explain *why* a feature is important for their career growth.
+                        2.  **Acknowledge and Address**: Always address the user by their name, {user_name}.
+                        3.  **Data Source**: Base your answers ONLY on the retrieved context from the program brochure and FAQ sheet.
+                        4.  **Marketing Spin**: Don't just state facts. Explain the 'so what'. For example, if asked about MLOps, explain that mastering it moves them from just building models to deploying scalable, production-ready AI, a skill that commands a premium salary.
+                        5.  **Context is Key**: Use the conversation history to maintain a natural, flowing dialogue.
+                        6.  **Handle Unknowns**: If the context doesn't have the answer, you MUST say: "That's an excellent and very specific question, {user_name}. While I don't have the details on that, it's something our program director can certainly clarify. I highly recommend reaching out to them at pragyan.ai.school@gmail.com for a direct answer." Do not invent information.
 
-                    <FAQ_CONTEXT>
-                    {context}
-                    </FAQ_CONTEXT>
-                    """
-                    
-                    prompt_template = ChatPromptTemplate.from_messages([
-                        ("system", system_prompt),
-                        ("human", "{user_question}")
-                    ])
+                        <CONVERSATION_HISTORY>
+                        {chat_history}
+                        </CONVERSATION_HISTORY>
 
-                    output_parser = StrOutputParser()
-                    chain = prompt_template | llm | output_parser
-                    
-                    response = chain.invoke({
-                        "context": context,
-                        "user_question": prompt,
-                        "user_name": st.session_state.user_name,
-                        "chat_history": chat_history_str
-                    })
-                    
-                    st.markdown(response)
-                    st.session_state.messages.append({"role": "assistant", "content": response})
-                except Exception as e:
-                    st.error(f"An error occurred with the AI assistant: {e}")
+                        <RETRIEVED_CONTEXT>
+                        {context}
+                        </RETRIEVED_CONTEXT>
+                        """
+                        
+                        prompt_template = ChatPromptTemplate.from_template(system_prompt_template)
+                        
+                        def format_docs(docs):
+                            return "\n\n".join(doc.page_content for doc in docs)
+
+                        def get_history(input_dict):
+                            return "\n".join([f"{msg['role']}: {msg['content']}" for msg in st.session_state.messages])
+
+                        def get_name(input_dict):
+                             return st.session_state.user_name
+
+                        rag_chain = (
+                            RunnableParallel({
+                                "context": retriever | format_docs,
+                                "user_question": RunnablePassthrough(),
+                                "chat_history": RunnableLambda(get_history),
+                                "user_name": RunnableLambda(get_name)
+                            })
+                            | prompt_template
+                            | llm
+                            | StrOutputParser()
+                        )
+                        
+                        response = rag_chain.invoke(prompt)
+                        st.markdown(response)
+                        st.session_state.messages.append({"role": "assistant", "content": response})
+
+                    except Exception as e:
+                        st.error(f"An error occurred with the AI assistant: {e}")
+        else:
+            st.info("Could not create the knowledge base for the Q&A assistant.")
     else:
-        st.info("Q&A data could not be loaded. Please check the Google Sheet URL and permissions.")
+        st.info("Q&A data could not be loaded. Please check the source URLs and permissions.")
+
 elif not api_key_present:
     st.warning("`GROQ_API_KEY` not found in Streamlit secrets. The Q&A bot is disabled. Please add it to your secrets file.", icon="⚠️")
     st.chat_input("Q&A Bot is disabled. API key is missing.", disabled=True)
 else: # API key is present but name is not
-    st.info("Please enter your name above to activate the AI Assistant.")
+    st.info("Please enter your name above to activate the AI Advisor.")
     st.chat_input("Enter your name to begin chat.", disabled=True)
-
 
 st.markdown("<br><br>", unsafe_allow_html=True)
 
