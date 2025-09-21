@@ -91,7 +91,7 @@ st.markdown("""
 def load_data(sheet_url):
     """Loads Q&A data from a public Google Sheet."""
     try:
-        csv_url = sheet_url.replace("/edit#gid=", "/export?format=csv&gid=")
+        csv_url = sheet_url.replace("/edit?usp=sharing", "/export?format=csv")
         df = pd.read_csv(csv_url)
         if 'Question' not in df.columns or 'Answer' not in df.columns:
             st.error("Google Sheet must contain 'Question' and 'Answer' columns.")
@@ -161,18 +161,23 @@ try:
 except (KeyError, FileNotFoundError):
     api_key_present = False
 
-google_sheet_url = "https://docs.google.com/spreadsheets/d/1Qsyn7n39z_tDoCUyF3C3a-k2jTym-2a--g6_7V2-S9U/edit#gid=0"
+google_sheet_url = "https://docs.google.com/spreadsheets/d/14NTraereEwWwLyhycjCP0TKJ2-a6eY38xjy5EbAN-jM/edit?usp=sharing"
 
-# Initialize chat history
+# Initialize session state variables
 if "messages" not in st.session_state:
     st.session_state.messages = []
+if 'user_name' not in st.session_state:
+    st.session_state.user_name = ""
+
+# Get user's name
+st.session_state.user_name = st.text_input("Please enter your name to start the chat:", st.session_state.user_name)
 
 # Display prior chat messages
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-if api_key_present:
+if api_key_present and st.session_state.user_name:
     qa_data = load_data(google_sheet_url)
     if qa_data is not None:
         context = "\n".join([f"Q: {row['Question']}\nA: {row['Answer']}" for index, row in qa_data.iterrows()])
@@ -184,21 +189,55 @@ if api_key_present:
 
             with st.chat_message("assistant"):
                 try:
+                    chat_history_str = "\n".join([f"{msg['role']}: {msg['content']}" for msg in st.session_state.messages])
+
                     llm = ChatGroq(model_name="llama-3.3-70b-versatile", groq_api_key=groq_api_key)
-                    system_prompt = "You are a helpful assistant for the Pragyan AI Executive Program. Answer the user's question based ONLY on the following information. If the answer is not in the information, say 'I do not have that information, please contact us for more details.'\n\n<CONTEXT>\n{context}\n</CONTEXT>"
-                    prompt_template = ChatPromptTemplate.from_messages([("system", system_prompt), ("human", "{user_question}")])
+                    
+                    system_prompt = """You are a friendly and helpful assistant for the Pragyan AI Executive Program. Your name is PragyanAI Bot. Your goal is to answer questions for a user named {user_name}.
+
+                    Follow these rules strictly:
+                    1. Be conversational and encouraging. Address the user by their name, {user_name}, when appropriate.
+                    2. Base your answers ONLY on the provided context from the FAQ sheet.
+                    3. Consider the ongoing conversation history to maintain context and avoid repetition.
+                    4. If the answer is not in the provided context, you MUST say: "That's a great question, {user_name}! I don't have that specific information right now, but please reach out to our team at pragyan.ai.school@gmail.com for more details." Do not make up answers.
+
+                    <CONVERSATION_HISTORY>
+                    {chat_history}
+                    </CONVERSATION_HISTORY>
+
+                    <FAQ_CONTEXT>
+                    {context}
+                    </FAQ_CONTEXT>
+                    """
+                    
+                    prompt_template = ChatPromptTemplate.from_messages([
+                        ("system", system_prompt),
+                        ("human", "{user_question}")
+                    ])
+
                     output_parser = StrOutputParser()
                     chain = prompt_template | llm | output_parser
-                    response = chain.invoke({"context": context, "user_question": prompt})
+                    
+                    response = chain.invoke({
+                        "context": context,
+                        "user_question": prompt,
+                        "user_name": st.session_state.user_name,
+                        "chat_history": chat_history_str
+                    })
+                    
                     st.markdown(response)
                     st.session_state.messages.append({"role": "assistant", "content": response})
                 except Exception as e:
                     st.error(f"An error occurred with the AI assistant: {e}")
     else:
         st.info("Q&A data could not be loaded. Please check the Google Sheet URL and permissions.")
-else:
+elif not api_key_present:
     st.warning("`GROQ_API_KEY` not found in Streamlit secrets. The Q&A bot is disabled. Please add it to your secrets file.", icon="⚠️")
     st.chat_input("Q&A Bot is disabled. API key is missing.", disabled=True)
+else: # API key is present but name is not
+    st.info("Please enter your name above to activate the AI Assistant.")
+    st.chat_input("Enter your name to begin chat.", disabled=True)
+
 
 st.markdown("<br><br>", unsafe_allow_html=True)
 
