@@ -1,6 +1,13 @@
 streamlit
 pandas
 numpy
+requests
 langchain-groq
 langchain
+langchain-core
 langchain-community
+langchain-huggingface
+langchain-text-splitters
+pypdf
+faiss-cpu
+sentence-transformers
