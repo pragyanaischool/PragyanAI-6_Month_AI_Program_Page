@@ -20,6 +20,14 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
+# --- SESSION STATE INITIALIZATION ---
+# Initialize session state variables at the top to ensure they are always available.
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+if 'user_name' not in st.session_state:
+    st.session_state.user_name = ""
+
+
 # --- Custom CSS for Styling ---
 st.markdown("""
 <style>
@@ -97,13 +105,17 @@ st.markdown("""
 # --- Data Loading and Caching Functions ---
 @st.cache_data(ttl=600)
 def load_faq_data(sheet_url):
-    """Loads Q&A data from a public Google Sheet."""
+    """Loads Q&A data from a public Google Sheet, assuming first two columns are Q&A."""
     try:
         csv_url = sheet_url.replace("/edit?usp=sharing", "/export?format=csv")
         df = pd.read_csv(csv_url)
-        if 'FAQs' not in df.columns or 'Answere' not in df.columns:
-            st.error("Google Sheet must contain 'FAQs' and 'Answere' columns.")
+        if df.shape[1] < 2:
+            st.error("The Google Sheet needs at least two columns for questions and answers.")
             return None
+        # Make the function robust by renaming the first two columns programmatically.
+        df = df.iloc[:, [0, 1]]
+        df.columns = ['FAQs', 'Answere']
+        df.dropna(inplace=True)
         return df
     except Exception as e:
         st.error(f"Failed to load data from Google Sheet: {e}")
@@ -127,7 +139,6 @@ def load_pdf_from_gdrive(drive_url):
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
         splits = text_splitter.split_text(text)
         
-        # Create Document objects for easier processing
         documents = [Document(page_content=split, metadata={"source": "program_brochure"}) for split in splits]
         return documents
 
@@ -145,7 +156,6 @@ def get_embeddings():
 def create_vector_store(_faq_df, _pdf_docs, embeddings):
     """Creates a FAISS vector store from the FAQ DataFrame and PDF documents."""
     documents = []
-    # Process FAQ data
     if _faq_df is not None:
         faq_docs = [
             Document(
@@ -155,7 +165,6 @@ def create_vector_store(_faq_df, _pdf_docs, embeddings):
         ]
         documents.extend(faq_docs)
     
-    # Process PDF data
     if _pdf_docs is not None:
         documents.extend(_pdf_docs)
 
@@ -164,6 +173,15 @@ def create_vector_store(_faq_df, _pdf_docs, embeddings):
         
     vector_store = FAISS.from_documents(documents, embeddings)
     return vector_store
+
+# --- Helper functions for RAG Chain (defined at top level for clarity) ---
+def get_history(input_dict):
+    """Safely gets chat history from session state."""
+    return "\n".join([f"{msg['role']}: {msg['content']}" for msg in st.session_state.get('messages', [])])
+
+def get_name(input_dict):
+    """Safely gets user name from session state."""
+    return st.session_state.get('user_name', "")
 
 # --- Header ---
 col1, col2, col3 = st.columns([2, 5, 2])
@@ -228,12 +246,6 @@ except (KeyError, FileNotFoundError):
 faq_sheet_url = "https://docs.google.com/spreadsheets/d/14NTraereEwWwLyhycjCP0TKJ2-a6eY38xjy5EbAN-jM/edit?usp=sharing"
 brochure_drive_url = "https://drive.google.com/file/d/1JXtgnsfceX7doT8-mECEGjE_MXQgp9lK/view?usp=sharing"
 
-# Initialize session state variables
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-if 'user_name' not in st.session_state:
-    st.session_state.user_name = ""
-
 # Get user's name
 st.session_state.user_name = st.text_input("Please enter your name to start the chat:", st.session_state.user_name)
 
@@ -279,18 +291,14 @@ if api_key_present and st.session_state.user_name:
                         <RETRIEVED_CONTEXT>
                         {context}
                         </RETRIEVED_CONTEXT>
+                        
+                        Given the context and conversation history, answer the user's question: {user_question}
                         """
                         
                         prompt_template = ChatPromptTemplate.from_template(system_prompt_template)
                         
                         def format_docs(docs):
                             return "\n\n".join(doc.page_content for doc in docs)
-
-                        def get_history(input_dict):
-                            return "\n".join([f"{msg['role']}: {msg['content']}" for msg in st.session_state.messages])
-
-                        def get_name(input_dict):
-                             return st.session_state.user_name
 
                         rag_chain = (
                             RunnableParallel({
