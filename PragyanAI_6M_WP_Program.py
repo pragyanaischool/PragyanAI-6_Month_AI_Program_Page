@@ -100,7 +100,7 @@ def load_data(sheet_url):
 # --- Header ---
 col1, col2, col3 = st.columns([2, 5, 2])
 with col2:
-    st.image("PragyanAI_Transperent_github.png", use_column_width=True)
+    st.image("PragyanAI_Transperent_github.png", use_container_width=True)
 
 # --- Hero Section ---
 st.markdown("<br>", unsafe_allow_html=True)
