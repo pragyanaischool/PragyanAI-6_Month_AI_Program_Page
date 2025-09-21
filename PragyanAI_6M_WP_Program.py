@@ -304,7 +304,7 @@ st.markdown('<h2 class="section-header">Have Questions? Ask PragyanAI AI Marketi
 
 # Check for Groq API Key in secrets
 try:
-    st.secrets["GROQ_API_KEY"]
+    #st.secrets["GROQ_API_KEY"]
     api_key_present = True
 except (KeyError, FileNotFoundError):
     api_key_present = False
