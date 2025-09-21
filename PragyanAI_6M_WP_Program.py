@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import requests
 import io
+import logging
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
@@ -248,7 +249,12 @@ def run_chat_dialog():
                 st.session_state.messages.append({"role": "assistant", "content": response})
                 st.rerun() # Rerun to update the chat history display in the dialog
             except Exception as e:
-                st.error(f"An error occurred with the AI assistant: {e}")
+                # --- THIS IS THE FIX ---
+                # Log the detailed, sensitive error to the console for debugging
+                logging.error(f"AI Assistant Error: {e}")
+                # Show a generic, safe message to the user
+                st.error("I'm sorry, I encountered a connection issue. Please check your API key or try again later.")
+
 
 # --- UI LAYOUT ---
 
@@ -304,7 +310,7 @@ except (KeyError, FileNotFoundError):
     api_key_present = False
 
 if not api_key_present:
-    st.warning("LLM API KEY not found in Streamlit secrets. The Q&A bot is disabled.", icon="⚠️")
+    st.warning("`GROQ_API_KEY` not found in Streamlit secrets. The Q&A bot is disabled.", icon="⚠️")
 elif st.session_state.vector_store is None:
     st.warning("The knowledge base for the AI Advisor could not be loaded. Please check data sources.", icon="🧠")
 else:
